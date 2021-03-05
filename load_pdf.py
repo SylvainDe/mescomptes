@@ -64,21 +64,61 @@ def load_file(filepath, compte):
             date = datetime.datetime.strptime(inscription['date'], shortdate_format).date()
             montant = atof(inscription['montant'].replace(' ', ''))
             # Inject in database
-            compte.inscription_set.create(
+            compte.inscription_set_create(Operation(
                     date=date,
                     debit=montant if debit else None,
                     credit=montant if credit else None,
-                    libelle=inscription['libelle'])
+                    description=inscription['libelle']))
+
+class Operation():
+    def __init__(self, date, debit, credit, description):
+        self.date = date
+        self.debit = debit
+        self.credit = credit
+        self.description = description
+
+    @staticmethod
+    def from_optional_value(val):
+        return 0 if val is None else val
+
+    def debit_value(self):
+        return self.from_optional_value(self.debit)
+
+    def credit_value(self):
+        return self.from_optional_value(self.credit)
+
+    def balance(self):
+        return self.credit_value() - self.debit_value()
+
+class Compte():
+    def __init__(self, name):
+        self.name = name
+        self.operations = []
+
+    def inscription_set_create(self, operation):
+        self.operations.append(operation)
+
+    def save_to_file(self, csv_filename):
+        import csv
+        with open(csv_filename, 'w', newline='') as csvfile:
+            spamwriter = csv.writer(csvfile, dialect='excel')
+            spamwriter.writerow(("Date", "Debit", "Credit", "Balance", "Description"))
+            for op in self.operations:
+                spamwriter.writerow((op.date, op.debit, op.credit, op.balance(), op.description))
+            total_debit = sum(op.debit_value() for op in self.operations)
+            total_credit = sum(op.credit_value() for op in self.operations)
+            total_balance = sum(op.balance() for op in self.operations)
+            total_balance2 = total_credit - total_debit
+            # print(total_debit, total_credit, total_balance, total_balance2)
+            # assert total_balance == total_balance2
+            spamwriter.writerow(("Total", total_debit, total_credit, total_balance))
 
 
 def main():
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "comptes.settings")
-    import django
-    django.setup()
     locale.setlocale(locale.LC_ALL, "fr_FR.utf8")
-    from mescomptes.models import Compte
     parser = get_parser()
     args = parser.parse_args()
+    compte = Compte(name="toto")
     for filepath in args.files:
         print("Importing \'{filepath}\'".format(filepath=filepath))
         if args.auto_detect_account:
@@ -97,12 +137,8 @@ def main():
         else:
             account = args.account
         print("Compte : {compte}".format(compte=account))
-        try:
-            compte = Compte.objects.get(name=account)
-        except Compte.DoesNotExist:
-            print("The account {account} does not exist".format(account=account))
-            sys.exit(1)
         load_file(filepath, compte)
+    compte.save_to_file("toto.xls")
 
 
 if __name__ == "__main__":
